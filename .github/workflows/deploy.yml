@@ -1,0 +1,75 @@
+name: Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # ইউজারনেম/রিপোজিটরির নাম যাই থাকুক, ছোট হাতের অক্ষরে রূপান্তর করা হচ্ছে
+    - name: Set lowercase image tags
+      run: |
+        IMAGE_API="ghcr.io/${{ github.repository }}/content-engine-api"
+        IMAGE_WORKER="ghcr.io/${{ github.repository }}/content-engine-worker"
+        echo "IMAGE_API=${IMAGE_API,,}" >> $GITHUB_ENV
+        echo "IMAGE_WORKER=${IMAGE_WORKER,,}" >> $GITHUB_ENV
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build & Push API Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.api
+        push: true
+        tags: |
+          ${{ env.IMAGE_API }}:latest
+          ${{ env.IMAGE_API }}:${{ github.sha }}
+
+    - name: Build & Push Worker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.worker
+        push: true
+        tags: |
+          ${{ env.IMAGE_WORKER }}:latest
+          ${{ env.IMAGE_WORKER }}:${{ github.sha }}
+
+  deploy-to-k8s:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # ক্লাউড বা K8s ক্লাস্টারের সিক্রেট দেওয়া থাকলেই কেবল ডেপ্লয় রান হবে
+    if: "${{ secrets.KUBECONFIG != '' }}"
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set Kubernetes Context
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBECONFIG }}
+
+    - name: Deploy Manifests
+      run: |
+        kubectl apply -f k8s/configmap-secret.yaml
+        kubectl apply -f k8s/kafka.yaml
+        kubectl apply -f k8s/api-deployment.yaml
+        kubectl apply -f k8s/worker-deployment.yaml
+        kubectl rollout restart deployment/api-deployment
+        kubectl rollout restart deployment/worker-deployment
