@@ -15,7 +15,6 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # ইউজারনেম/রিপোজিটরির নাম যাই থাকুক, ছোট হাতের অক্ষরে রূপান্তর করা হচ্ছে
     - name: Set lowercase image tags
       run: |
         IMAGE_API="ghcr.io/${{ github.repository }}/content-engine-api"
@@ -53,19 +52,23 @@ jobs:
   deploy-to-k8s:
     needs: build-and-push
     runs-on: ubuntu-latest
-    # ক্লাউড বা K8s ক্লাস্টারের সিক্রেট দেওয়া থাকলেই কেবল ডেপ্লয় রান হবে
-    if: "${{ secrets.KUBECONFIG != '' }}"
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
 
     - name: Set Kubernetes Context
+      if: env.KUBECONFIG_SECRET != ''
+      env:
+        KUBECONFIG_SECRET: ${{ secrets.KUBECONFIG }}
       uses: azure/k8s-set-context@v3
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBECONFIG }}
 
     - name: Deploy Manifests
+      if: env.KUBECONFIG_SECRET != ''
+      env:
+        KUBECONFIG_SECRET: ${{ secrets.KUBECONFIG }}
       run: |
         kubectl apply -f k8s/configmap-secret.yaml
         kubectl apply -f k8s/kafka.yaml
